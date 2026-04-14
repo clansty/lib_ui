@@ -41,6 +41,8 @@ PRIVATE
 
     ui/accessible/ui_accessible_factory.cpp
     ui/accessible/ui_accessible_factory.h
+    ui/accessible/ui_accessible_item.cpp
+    ui/accessible/ui_accessible_item.h
     ui/accessible/ui_accessible_widget.cpp
     ui/accessible/ui_accessible_widget.h
     ui/dpr/dpr_icon.cpp
@@ -247,6 +249,8 @@ PRIVATE
     ui/widgets/menu/menu_toggle.h
     ui/widgets/elastic_scroll.cpp
     ui/widgets/elastic_scroll.h
+    ui/widgets/pill_tabs.cpp
+    ui/widgets/pill_tabs.h
     ui/widgets/popup_menu.cpp
     ui/widgets/popup_menu.h
     ui/widgets/rp_window.cpp
@@ -313,6 +317,8 @@ PRIVATE
     ui/round_rect.h
     ui/rp_widget.cpp
     ui/rp_widget.h
+    ui/screen_reader_mode.cpp
+    ui/screen_reader_mode.h
     ui/ui_rpl_filter.h
     ui/ui_utility.cpp
     ui/ui_utility.h

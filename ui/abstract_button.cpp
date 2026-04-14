@@ -39,8 +39,9 @@ void AbstractButton::enterEventHook(QEnterEvent *e) {
 	return RpWidget::enterEventHook(e);
 }
 
-void AbstractButton::setAcceptBoth(bool acceptBoth) {
+void AbstractButton::setAcceptBoth(bool acceptBoth, bool triggerOnPress) {
 	_acceptBoth = acceptBoth;
+	_triggerOnPress = triggerOnPress;
 }
 
 void AbstractButton::checkIfOver(QPoint localPos) {
@@ -173,6 +174,10 @@ bool AbstractButton::setDown(
 		if (weak) {
 			accessibilityStateChanged({ .pressed = true });
 		}
+		if (_triggerOnPress && button != Qt::LeftButton) {
+			_state &= ~State(StateFlag::Down);
+			clicked(modifiers, button);
+		}
 		return true;
 	} else if (!down && (_state & StateFlag::Down)) {
 		const auto was = _state;
@@ -220,7 +225,7 @@ void AbstractButton::clearState() {
 
 AccessibilityState AbstractButton::accessibilityState() const {
 	return { .pressed = isDown() };
-	}
+}
 
 void AbstractButton::accessibilityDoAction(const QString &name) {
 	if (name == QAccessibleActionInterface::pressAction()) {

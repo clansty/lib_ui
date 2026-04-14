@@ -7,25 +7,26 @@
 #pragma once
 
 #include "base/qt_connection.h"
+#include "styles/style_widgets.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/menu/menu.h"
 #include "ui/widgets/menu/menu_common.h"
-#include "styles/style_widgets.h"
 
 namespace Ui::Menu {
 
 class Menu;
 
-class ItemBase : public RippleButton {
+class ItemBase : public RippleButton
+{
 public:
-	ItemBase(not_null<RpWidget*> parent, const style::Menu &st);
+	ItemBase(not_null<Menu *> parent, const style::Menu &st);
+
+	Qt::FocusPolicy accessibilityFocusPolicy() override { return Qt::ClickFocus; }
 
 	TriggeredSource lastTriggeredSource() const;
 
 	rpl::producer<CallbackData> selects() const;
-	void setSelected(
-		bool selected,
-		TriggeredSource source = TriggeredSource::Mouse);
+	void setSelected(bool selected, TriggeredSource source = TriggeredSource::Mouse);
 	bool isSelected() const;
 
 	int index() const;
@@ -35,37 +36,39 @@ public:
 
 	rpl::producer<CallbackData> clicks() const;
 
-	void setClickedCallback(Fn<void()> callback);
+	void setActionTriggered(Fn<void()> callback);
+	void setClickedCallback(Fn<void()> callback) = delete;
+
+	void setPreventClose(bool prevent);
+	bool preventClose() const;
 
 	rpl::producer<int> minWidthValue() const;
 	int minWidth() const;
 	void setMinWidth(int w);
 
-	virtual void handleKeyPress(not_null<QKeyEvent*> e) {
-	}
+	virtual void handleKeyPress(not_null<QKeyEvent *> e) {}
 
-	void setMenuAsParent(not_null<Menu*> menu);
-
-	virtual not_null<QAction*> action() const = 0;
+	virtual not_null<QAction *> action() const = 0;
 	virtual bool isEnabled() const = 0;
 
 	virtual void finishAnimating();
 
 protected:
-	void initResizeHook(rpl::producer<QSize> &&size);
+	void fitToMenuWidth();
 
 	void enableMouseSelecting();
-	void enableMouseSelecting(not_null<RpWidget*> widget);
+	void enableMouseSelecting(not_null<RpWidget *> widget);
 
 	virtual int contentHeight() const = 0;
 
+	void keyPressEvent(QKeyEvent *e) override;
+	void keyReleaseEvent(QKeyEvent *e) override;
 	void mousePressEvent(QMouseEvent *e) override;
 	void mouseMoveEvent(QMouseEvent *e) override;
 	void mouseReleaseEvent(QMouseEvent *e) override;
 
 private:
 	bool _mousePressed = false;
-	bool _mouseMovedAfterLeftPress = false;
 	int _index = -1;
 
 	rpl::variable<bool> _selected = false;
@@ -75,10 +78,11 @@ private:
 
 	TriggeredSource _lastTriggeredSource = TriggeredSource::Mouse;
 
+	bool _preventClose = false;
+
 	base::qt_connection _connection;
 
 	Menu *_menu = nullptr;
-
 };
 
 } // namespace Ui::Menu

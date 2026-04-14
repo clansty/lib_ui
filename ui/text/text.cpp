@@ -24,6 +24,7 @@
 namespace Ui {
 
 const QString kQEllipsis = u"..."_q;
+const QString kQBullet = QString::fromUtf8("\xE2\x80\xA2");
 
 } // namespace Ui
 
@@ -737,6 +738,37 @@ void String::setLink(uint16 index, const ClickHandlerPtr &link) {
 	}
 }
 
+TextSelection String::linkRangeFor(const ClickHandlerPtr &link) const {
+	if (!_extended || !link) {
+		return {};
+	}
+	const auto index = [&] {
+		const auto &links = _extended->links;
+		for (auto i = 0, count = int(links.size()); i != count; ++i) {
+			if (links[i] == link) {
+				return uint16(i + 1);
+			}
+		}
+		return uint16(0);
+	}();
+	if (!index) {
+		return {};
+	}
+	auto from = uint16(_text.size());
+	auto to = uint16(0);
+	for (auto i = 0, count = int(_blocks.size()); i != count; ++i) {
+		if (_blocks[i]->linkIndex() == index) {
+			const auto position = _blocks[i]->position();
+			const auto end = (i + 1 < count)
+				? _blocks[i + 1]->position()
+				: uint16(_text.size());
+			from = std::min(from, position);
+			to = std::max(to, end);
+		}
+	}
+	return (from < to) ? TextSelection{ from, to } : TextSelection{};
+}
+
 void String::setSpoilerRevealed(bool revealed, anim::type animated) {
 	const auto data = _extended ? _extended->spoiler.get() : nullptr;
 	if (!data) {
@@ -768,6 +800,24 @@ void String::setSpoilerLinkFilter(Fn<bool(const ClickContext&)> filter) {
 	_extended->spoiler->link = std::make_shared<SpoilerClickHandler>(
 		this,
 		std::move(filter));
+}
+
+bool String::hasCustomEmoji() const {
+	return _hasCustomEmoji;
+}
+
+void String::setCustomEmojiClickHandler(
+		Fn<bool(QStringView)> predicate,
+		Fn<void(QStringView, ClickContext)> callback) {
+	if (!_hasCustomEmoji) {
+		return;
+	}
+	const auto extended = ensureExtended();
+	extended->customEmoji = std::make_unique<CustomEmojiData>();
+	const auto data = extended->customEmoji.get();
+	data->predicate = std::move(predicate);
+	data->callback = std::move(callback);
+	data->link = std::make_shared<CustomEmojiClickHandler>(data);
 }
 
 void String::setBlockquoteExpandCallback(
@@ -908,7 +958,7 @@ void String::insertModifications(int position, int delta) {
 		modifications.insert(i, {
 			.position = position,
 			.skipped = uint16(delta < 0 ? (-delta) : 0),
-			.added = (delta > 0),
+			.added = uint16(delta > 0 ? 1 : 0),
 		});
 	}
 }
@@ -923,13 +973,31 @@ void String::removeModificationsAfter(int size) {
 		if (i->position > size) {
 			i = modifications.erase(i);
 		} else if (i->position == size) {
-			i->added = false;
+			i->added = 0;
 			if (!i->skipped) {
 				i = modifications.erase(i);
 			}
 		} else {
 			break;
 		}
+	}
+}
+
+void String::insertReplacement(int position, int skipped, int added) {
+	auto &modifications = ensureExtended()->modifications;
+	auto i = end(modifications);
+	while (i != begin(modifications) && (i - 1)->position > position) {
+		--i;
+	}
+	if (i != end(modifications) && i->position == position) {
+		i->skipped += uint16(skipped);
+		i->added += uint16(added);
+	} else {
+		modifications.insert(i, {
+			.position = position,
+			.skipped = uint16(skipped),
+			.added = uint16(added),
+		});
 	}
 }
 
@@ -945,7 +1013,7 @@ String::DimensionsResult String::countDimensions(
 	if (request.lineWidths && request.reserve) {
 		result.lineWidths.reserve(request.reserve);
 	}
-	enumerateLines(geometry, [&](QFixed lineWidth, int lineBottom) {
+	enumerateLines(geometry, [&](QFixed lineWidth, int lineBottom, int, bool) {
 		const auto width = lineWidth.ceil().toInt();
 		if (request.lineWidths) {
 			result.lineWidths.push_back(width);
@@ -963,7 +1031,7 @@ int String::countWidth(int width, bool breakEverywhere) const {
 	}
 
 	QFixed maxLineWidth = 0;
-	enumerateLines(width, breakEverywhere, [&](QFixed lineWidth, int) {
+	enumerateLines(width, breakEverywhere, [&](QFixed lineWidth, int, int, bool) {
 		if (lineWidth > maxLineWidth) {
 			maxLineWidth = lineWidth;
 		}
@@ -976,7 +1044,7 @@ int String::countHeight(int width, bool breakEverywhere) const {
 		return _minHeight;
 	}
 	int result = 0;
-	enumerateLines(width, breakEverywhere, [&](auto, int lineBottom) {
+	enumerateLines(width, breakEverywhere, [&](auto, int lineBottom, int, bool) {
 		result = lineBottom;
 	});
 	return result;
@@ -993,8 +1061,21 @@ std::vector<int> String::countLineWidths(
 	if (options.reserve) {
 		result.reserve(options.reserve);
 	}
-	enumerateLines(width, options.breakEverywhere, [&](QFixed lineWidth, int) {
+	enumerateLines(width, options.breakEverywhere, [&](QFixed lineWidth, int, int, bool) {
 		result.push_back(lineWidth.ceil().toInt());
+	});
+	return result;
+}
+
+std::vector<LineLayoutInfo> String::countLinesGeometry(int width) const {
+	auto result = std::vector<LineLayoutInfo>();
+	enumerateLines(width, false, [&](QFixed lineWidth, int lineBottom, int lineLeft, bool rtl) {
+		result.push_back({
+			.top = lineBottom,
+			.left = lineLeft,
+			.width = lineWidth.ceil().toInt(),
+			.rtl = rtl,
+		});
 	});
 	return result;
 }
@@ -1061,6 +1142,13 @@ void String::enumerateLines(
 		initNextLine();
 	};
 
+	const auto resolveRTL = [](Qt::LayoutDirection dir) {
+		return (dir == Qt::RightToLeft)
+			|| (dir == Qt::LayoutDirectionAuto && style::RightToLeft());
+	};
+	auto paragraphRTL = resolveRTL(
+		UnpackParagraphDirection(_startParagraphLTR, _startParagraphRTL));
+
 	if ((*_blocks.cbegin())->type() != TextBlockType::Newline) {
 		initNextParagraph(_startQuoteIndex);
 	}
@@ -1085,7 +1173,7 @@ void String::enumerateLines(
 				--qlinesleft;
 			}
 			if (!hidden) {
-				callback(lineLeft + lineWidth - widthLeft, top += lineHeight);
+				callback(lineLeft + lineWidth - widthLeft, top += lineHeight, lineLeft + qpadding.left(), paragraphRTL);
 			}
 			if (lineElided) {
 				return withElided(true);
@@ -1094,6 +1182,8 @@ void String::enumerateLines(
 			last_rBearing = 0;// b->f_rbearing(); (0 for newline)
 			last_rPadding = w->f_rpadding();
 
+			paragraphRTL = resolveRTL(static_cast<const NewlineBlock*>(
+				_blocks[block].get())->paragraphDirection());
 			initNextParagraph(index);
 			longWordLine = true;
 			lastWordStart = w;
@@ -1134,7 +1224,7 @@ void String::enumerateLines(
 		if (qlinesleft > 0) {
 			--qlinesleft;
 		}
-		callback(lineLeft + lineWidth - widthLeft, top += lineHeight);
+		callback(lineLeft + lineWidth - widthLeft, top += lineHeight, lineLeft + qpadding.left(), paragraphRTL);
 		if (lineElided) {
 			return withElided(true);
 		}
@@ -1157,7 +1247,9 @@ void String::enumerateLines(
 			: lineHeight;
 		callback(
 			lineLeft + lineWidth - widthLeft,
-			top + useLineHeight + qpadding.bottom());
+			top + useLineHeight + qpadding.bottom(),
+			lineLeft + qpadding.left(),
+			paragraphRTL);
 	}
 	return withElided(false);
 }
@@ -1618,6 +1710,10 @@ bool String::hasNotEmojiAndSpaces() const {
 const std::vector<Modification> &String::modifications() const {
 	static const auto kEmpty = std::vector<Modification>();
 	return _extended ? _extended->modifications : kEmpty;
+}
+
+int32 String::nextFormattedDateUpdate() const {
+	return _extended ? _extended->nextFormattedDateUpdate : 0;
 }
 
 QString String::toString(TextSelection selection) const {

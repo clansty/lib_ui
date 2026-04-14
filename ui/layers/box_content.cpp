@@ -110,8 +110,10 @@ BoxShow::operator bool() const {
 
 } // namespace
 
-void BoxContent::setTitle(rpl::producer<QString> title) {
-	getDelegate()->setTitle(std::move(title) | rpl::map(Text::WithEntities));
+void BoxContent::setTitle(v::text::data title, Text::MarkedContext context) {
+	getDelegate()->setTitle(
+		v::text::take_marked(std::move(title)),
+		std::move(context));
 }
 
 QPointer<AbstractButton> BoxContent::addButton(
@@ -140,9 +142,11 @@ QPointer<RoundButton> BoxContent::addButton(
 		rpl::producer<QString> text,
 		Fn<void()> clickCallback,
 		const style::RoundButton &st) {
-	auto button = object_ptr<RoundButton>(this, std::move(text), st);
+	auto button = object_ptr<RoundButton>(
+		this,
+		std::move(text),
+		st);
 	auto result = QPointer<RoundButton>(button.data());
-	result->setTextTransform(RoundButton::TextTransform::NoTransform);
 	result->setClickedCallback(std::move(clickCallback));
 	getDelegate()->addButton(std::move(button));
 	return result;
@@ -168,9 +172,11 @@ QPointer<RoundButton> BoxContent::addLeftButton(
 		rpl::producer<QString> text,
 		Fn<void()> clickCallback,
 		const style::RoundButton &st) {
-	auto button = object_ptr<RoundButton>(this, std::move(text), st);
+	auto button = object_ptr<RoundButton>(
+		this,
+		std::move(text),
+		st);
 	const auto result = QPointer<RoundButton>(button.data());
-	result->setTextTransform(RoundButton::TextTransform::NoTransform);
 	result->setClickedCallback(std::move(clickCallback));
 	getDelegate()->addLeftButton(std::move(button));
 	return result;
