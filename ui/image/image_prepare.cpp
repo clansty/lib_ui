@@ -528,7 +528,8 @@ ReadResult Read(ReadArgs &&args) {
 		? Option::RoundLarge
 		: (radius == ImageRoundRadius::Small)
 		? Option::RoundSmall
-		: (radius == ImageRoundRadius::Ellipse)
+		: (radius == ImageRoundRadius::Ellipse
+			|| radius == ImageRoundRadius::AyuUserpic)
 		? Option::RoundCircle
 		: Option::None);
 }
@@ -1130,7 +1131,8 @@ QImage Round(
 		QRect target) {
 	if (!static_cast<int>(corners)) {
 		return std::move(image);
-	} else if (radius == ImageRoundRadius::Ellipse) {
+	} else if (radius == ImageRoundRadius::Ellipse
+		|| radius == ImageRoundRadius::AyuUserpic) {
 		Assert((corners & RectPart::AllCorners) == RectPart::AllCorners);
 		return Circle(std::move(image), target);
 	}
