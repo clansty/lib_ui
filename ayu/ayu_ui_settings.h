@@ -8,6 +8,8 @@
 
 namespace AyuUiSettings {
 
+inline constexpr int kMaxAvatarCorners = 23;
+
 void setMonoFont(QString newFont);
 QString getMonoFont();
 
@@ -18,5 +20,8 @@ int getWideMultiplied(int width, double mult);
 
 void setMaterialSwitches(bool val);
 bool isMaterialSwitches();
+
+void setAvatarCorners(int val);
+int getAvatarCorners();
 
 }

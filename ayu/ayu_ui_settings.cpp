@@ -13,6 +13,7 @@ namespace AyuUiSettings {
 QString monoFont;
 double wideMultiplier = 1.0;
 bool materialSwitches;
+int avatarCorners = kMaxAvatarCorners;
 
 void setMonoFont(QString newFont) {
 	monoFont = std::move(newFont);
@@ -44,6 +45,14 @@ void setMaterialSwitches(bool val) {
 
 bool isMaterialSwitches() {
 	return materialSwitches;
+}
+
+void setAvatarCorners(int val) {
+	avatarCorners = val;
+}
+
+int getAvatarCorners() {
+	return avatarCorners;
 }
 
 }
