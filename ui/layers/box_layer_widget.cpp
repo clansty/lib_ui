@@ -14,6 +14,10 @@
 #include "styles/style_layers.h"
 #include "styles/palette.h"
 
+#include <QtGui/QWindow>
+
+#include <limits>
+
 namespace Ui {
 
 struct BoxLayerWidget::LoadingProgress {
@@ -32,20 +36,23 @@ BoxLayerWidget::LoadingProgress::LoadingProgress(
 }
 
 BoxLayerWidget::BoxLayerWidget(
-	not_null<LayerStackWidget*> layer,
+	QWidget *parent,
+	not_null<LayerStackDelegate*> delegate,
 	object_ptr<BoxContent> content)
-: LayerWidget(layer)
-, _layer(layer)
+: LayerWidget(parent)
+, _layer(delegate)
 , _content(std::move(content))
 , _roundRect(st::boxRadius, st().bg) {
 	_content->setParent(this);
-	_content->setDelegate(this);
 
 	_additionalTitle.changes(
 	) | rpl::on_next([=] {
 		updateSize();
 		update();
 	}, lifetime());
+
+	updateMaxRealHeight();
+	_content->setDelegate(this);
 }
 
 BoxLayerWidget::~BoxLayerWidget() = default;
@@ -66,20 +73,22 @@ int BoxLayerWidget::titleHeight() const {
 }
 
 const style::Box &BoxLayerWidget::st() const {
-	return _st
-		? *_st
-		: _layerType
-		? (_layer->boxStyleOverrideLayer()
-			? *_layer->boxStyleOverrideLayer()
-			: st::layerBox)
-		: (_layer->boxStyleOverride()
-			? *_layer->boxStyleOverride()
-			: st::defaultBox);
+	if (_st) {
+		return *_st;
+	}
+	const auto override = _layerType
+		? _layer->boxStyleOverrideLayer()
+		: _layer->boxStyleOverride();
+	if (override) {
+		return *override;
+	}
+	return _layerType ? st::layerBox : st::defaultBox;
 }
 
 void BoxLayerWidget::setStyle(const style::Box &st) {
 	_st = &st;
 	_roundRect.setColor(st.bg);
+	updateMaxRealHeight();
 }
 
 const style::Box &BoxLayerWidget::style() {
@@ -155,14 +164,33 @@ void BoxLayerWidget::paintAdditionalTitle(Painter &p) {
 }
 
 void BoxLayerWidget::parentResized() {
+	const auto parent = parentWidget();
+	if (!parent || !_layer->centerWithinOuter()) {
+		return;
+	}
+	updateMaxRealHeight();
 	auto newHeight = countRealHeight();
-	auto parentSize = parentWidget()->size();
+	auto parentSize = parent->size();
 	setGeometry(
 		(parentSize.width() - width()) / 2,
 		(parentSize.height() - newHeight) / 2,
 		width(),
 		newHeight);
 	update();
+}
+
+void BoxLayerWidget::updateMaxRealHeight() {
+	const auto &margin = st().margin;
+	const auto outer = _layer->layerOuterSize();
+	const auto parent = parentWidget();
+	const auto containerHeight = outer
+		? outer->height()
+		: parent
+		? parent->height()
+		: std::numeric_limits<int>::max() / 2;
+	const auto max = containerHeight - margin.top() - margin.bottom();
+	_realHeightMax = max;
+	_contentHeightMax = max - contentTop() - buttonsHeight();
 }
 
 void BoxLayerWidget::setTitle(
@@ -208,6 +236,14 @@ bool BoxLayerWidget::closeByOutsideClick() const {
 	return _closeByOutsideClick;
 }
 
+rpl::producer<int> BoxLayerWidget::layerHeightMaxValue() {
+	return _realHeightMax.value();
+}
+
+rpl::producer<int> BoxLayerWidget::contentHeightMaxValue() {
+	return _contentHeightMax.value();
+}
+
 bool BoxLayerWidget::hasTitle() const {
 	return (_title != nullptr) || !_additionalTitle.current().isEmpty();
 }
@@ -221,6 +257,20 @@ void BoxLayerWidget::showBox(
 
 void BoxLayerWidget::hideLayer() {
 	_layer->hideLayers(anim::type::normal);
+}
+
+ShowFactory BoxLayerWidget::showFactory() {
+	return _layer->showFactory();
+}
+
+QPointer<QWidget> BoxLayerWidget::outerContainer() {
+	if (const auto fromDelegate = _layer->layerOuterContainer()) {
+		return fromDelegate;
+	}
+	if (const auto parent = parentWidget()) {
+		return parent;
+	}
+	return this;
 }
 
 void BoxLayerWidget::updateSize() {
@@ -245,14 +295,6 @@ void BoxLayerWidget::updateButtonsPositions() {
 		button->moveToRight(right, 0);
 		right += button->width();
 	}
-}
-
-ShowFactory BoxLayerWidget::showFactory() {
-	return _layer->showFactory();
-}
-
-QPointer<QWidget> BoxLayerWidget::outerContainer() {
-	return parentWidget();
 }
 
 void BoxLayerWidget::updateTitlePosition() {
@@ -361,17 +403,21 @@ void BoxLayerWidget::showLoading(bool show) {
 }
 
 
-void BoxLayerWidget::setDimensions(int newWidth, int maxHeight, bool forceCenterPosition) {
+void BoxLayerWidget::setDimensions(
+		int newWidth,
+		int maxHeight,
+		bool forceCenterPosition) {
 	_maxContentHeight = maxHeight;
 
 	auto fullHeight = countFullHeight();
 	if (width() != newWidth || _fullHeight != fullHeight) {
 		_fullHeight = fullHeight;
-		if (parentWidget()) {
+		const auto parent = parentWidget();
+		if (parent && _layer->centerWithinOuter()) {
 			auto oldGeometry = geometry();
 			resize(newWidth, countRealHeight());
 			auto newGeometry = geometry();
-			auto parentHeight = parentWidget()->height();
+			auto parentHeight = parent->height();
 			const auto bottomMargin = st().margin.bottom();
 			if (newGeometry.top() + newGeometry.height() + bottomMargin > parentHeight
 				|| forceCenterPosition) {
@@ -385,18 +431,15 @@ void BoxLayerWidget::setDimensions(int newWidth, int maxHeight, bool forceCenter
 					resizeEvent(0);
 				}
 			}
-			parentWidget()->update(oldGeometry.united(geometry()).marginsAdded(st::boxRoundShadow.extend));
+			parent->update(oldGeometry.united(geometry()).marginsAdded(st::boxRoundShadow.extend));
 		} else {
-			resize(newWidth, 0);
+			resize(newWidth, countRealHeight());
 		}
 	}
 }
 
 int BoxLayerWidget::countRealHeight() const {
-	const auto &margin = st().margin;
-	return std::min(
-		_fullHeight,
-		parentWidget()->height() - margin.top() - margin.bottom());
+	return std::min(_fullHeight, _realHeightMax.current());
 }
 
 int BoxLayerWidget::countFullHeight() const {
@@ -407,8 +450,7 @@ int BoxLayerWidget::contentTop() const {
 	return hasTitle()
 		? titleHeight()
 		: _noContentMargin
-		?
-		0
+		? 0
 		: st::boxTopMargin;
 }
 
@@ -429,6 +471,22 @@ void BoxLayerWidget::keyPressEvent(QKeyEvent *e) {
 	} else {
 		LayerWidget::keyPressEvent(e);
 	}
+}
+
+void BoxLayerWidget::mousePressEvent(QMouseEvent *e) {
+	if (e->button() == Qt::LeftButton
+		&& _layer->dragByTitle()
+		&& e->pos().y() < titleHeight()) {
+		if (const auto top = window()) {
+			if (const auto handle = top->windowHandle()) {
+				if (handle->startSystemMove()) {
+					e->accept();
+					return;
+				}
+			}
+		}
+	}
+	LayerWidget::mousePressEvent(e);
 }
 
 } // namespace Ui
